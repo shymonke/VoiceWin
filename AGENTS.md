@@ -2,6 +2,15 @@
 
 Guidelines for AI agents working on this WPF speech-to-text application.
 
+## How to work with me
+
+- **Explain things in simple English.** No jargon unless you define it in the same sentence. Assume I want to understand what you did, not just that it works.
+- **Don't assume — ask.** If my request has more than one reasonable reading, stop and ask which one I mean. A wrong guess costs more than a question.
+- **Tell me when something is over-engineered.** If there's a simpler way to get the same result, say so before you build the complicated version.
+- **Tell me when I'm being vague.** If I haven't given you enough to go on, say what's missing instead of filling the gap yourself.
+- **Tell me when I'm contradicting myself.** If a new instruction conflicts with something I said earlier or with what's already in the code, flag the conflict and let me pick.
+- **Flag destructive actions before doing them.** Deleting files, resetting branches, force-pushing, dropping unpushed commits — tell me exactly what will be lost first.
+
 ## Build Commands
 
 ```bash
