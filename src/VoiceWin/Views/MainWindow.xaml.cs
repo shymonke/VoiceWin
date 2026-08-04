@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,6 +15,11 @@ public partial class MainWindow : Window
     private bool _isRecordingHotkey;
     private int _pendingHotkeyVirtualKey;
     private int _pendingHotkeyModifiers;
+    private List<int> _pendingHotkeySequence = new();
+
+    // While recording: every key/button pressed, in the order it went down.
+    private readonly List<int> _captureOrder = new();
+    private readonly HashSet<int> _captureHeld = new();
 
     public MainWindow()
     {
@@ -63,7 +67,8 @@ public partial class MainWindow : Window
 
         _pendingHotkeyVirtualKey = settings.HotkeyVirtualKey;
         _pendingHotkeyModifiers = settings.HotkeyModifiers;
-        HotkeyDisplayBox.Text = GetHotkeyDisplayString(_pendingHotkeyModifiers, _pendingHotkeyVirtualKey);
+        _pendingHotkeySequence = new List<int>(settings.HotkeySequence);
+        UpdateHotkeyDisplay();
 
         _statusOverlay.SetPosition(settings.OverlayPosition);
     }
@@ -222,6 +227,7 @@ public partial class MainWindow : Window
             settings.StartMinimized = StartMinimizedCheckBox.IsChecked ?? true;
             settings.HotkeyVirtualKey = _pendingHotkeyVirtualKey;
             settings.HotkeyModifiers = _pendingHotkeyModifiers;
+            settings.HotkeySequence = new List<int>(_pendingHotkeySequence);
         });
 
         _app.Orchestrator.UpdateHotkeySettings();
@@ -301,20 +307,33 @@ public partial class MainWindow : Window
     {
         if (_isRecordingHotkey)
         {
-            _isRecordingHotkey = false;
-            RecordHotkeyButton.Content = "Record";
-            HotkeyDisplayBox.Text = GetHotkeyDisplayString(_pendingHotkeyModifiers, _pendingHotkeyVirtualKey);
+            StopRecordingHotkey();
             return;
         }
 
         _isRecordingHotkey = true;
+        _captureOrder.Clear();
+        _captureHeld.Clear();
         RecordHotkeyButton.Content = "Cancel";
-        HotkeyDisplayBox.Text = "Press key combo...";
+        HotkeyDisplayBox.Text = "Press keys / mouse buttons in order...";
         HotkeyDisplayBox.Focus();
     }
 
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
+    private void StopRecordingHotkey()
+    {
+        _isRecordingHotkey = false;
+        _captureOrder.Clear();
+        _captureHeld.Clear();
+        RecordHotkeyButton.Content = "Record";
+        UpdateHotkeyDisplay();
+    }
+
+    private void UpdateHotkeyDisplay()
+    {
+        HotkeyDisplayBox.Text = _pendingHotkeySequence.Count > 0
+            ? string.Join(" → ", _pendingHotkeySequence.Select(GetKeyName))
+            : GetHotkeyDisplayString(_pendingHotkeyModifiers, _pendingHotkeyVirtualKey);
+    }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
@@ -326,28 +345,9 @@ public partial class MainWindow : Window
 
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         int vkCode = KeyInterop.VirtualKeyFromKey(key);
-        
         if (vkCode == 0) return;
 
-        bool isModifier = IsModifierKey(vkCode);
-        
-        int modifiers = 0;
-        if ((GetAsyncKeyState(0xA2) & 0x8000) != 0 || (GetAsyncKeyState(0xA3) & 0x8000) != 0) modifiers |= 1;
-        if ((GetAsyncKeyState(0xA4) & 0x8000) != 0 || (GetAsyncKeyState(0xA5) & 0x8000) != 0) modifiers |= 2;
-        if ((GetAsyncKeyState(0xA0) & 0x8000) != 0 || (GetAsyncKeyState(0xA1) & 0x8000) != 0) modifiers |= 4;
-        if ((GetAsyncKeyState(0x5B) & 0x8000) != 0 || (GetAsyncKeyState(0x5C) & 0x8000) != 0) modifiers |= 8;
-
-        if (isModifier)
-        {
-            HotkeyDisplayBox.Text = GetModifierString(modifiers) + "...";
-            return;
-        }
-
-        _pendingHotkeyModifiers = modifiers;
-        _pendingHotkeyVirtualKey = vkCode;
-        HotkeyDisplayBox.Text = GetHotkeyDisplayString(modifiers, vkCode);
-        _isRecordingHotkey = false;
-        RecordHotkeyButton.Content = "Record";
+        CaptureInputDown(vkCode);
     }
 
     protected override void OnPreviewKeyUp(KeyEventArgs e)
@@ -356,24 +356,116 @@ public partial class MainWindow : Window
 
         if (!_isRecordingHotkey) return;
 
+        e.Handled = true;
+
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         int vkCode = KeyInterop.VirtualKeyFromKey(key);
-        
-        if (IsModifierKey(vkCode) && _pendingHotkeyModifiers == 0)
-        {
-            _pendingHotkeyVirtualKey = vkCode;
-            _pendingHotkeyModifiers = 0;
-            HotkeyDisplayBox.Text = GetKeyName(vkCode);
-            _isRecordingHotkey = false;
-            RecordHotkeyButton.Content = "Record";
-            e.Handled = true;
-        }
+        if (vkCode == 0) return;
+
+        CaptureInputUp(vkCode);
     }
+
+    protected override void OnPreviewMouseDown(MouseButtonEventArgs e)
+    {
+        base.OnPreviewMouseDown(e);
+
+        if (!_isRecordingHotkey) return;
+
+        int vkCode = MouseButtonToVirtualKey(e.ChangedButton);
+        if (vkCode == 0) return; // left click stays usable so the Cancel button still works
+
+        e.Handled = true;
+        CaptureInputDown(vkCode);
+    }
+
+    protected override void OnPreviewMouseUp(MouseButtonEventArgs e)
+    {
+        base.OnPreviewMouseUp(e);
+
+        if (!_isRecordingHotkey) return;
+
+        int vkCode = MouseButtonToVirtualKey(e.ChangedButton);
+        if (vkCode == 0) return;
+
+        e.Handled = true;
+        CaptureInputUp(vkCode);
+    }
+
+    private static int MouseButtonToVirtualKey(MouseButton button) => button switch
+    {
+        MouseButton.Right => 0x02,
+        MouseButton.Middle => 0x04,
+        MouseButton.XButton1 => 0x05,
+        MouseButton.XButton2 => 0x06,
+        _ => 0 // Left is deliberately not bindable
+    };
+
+    private void CaptureInputDown(int vkCode)
+    {
+        if (!_captureHeld.Add(vkCode)) return; // ignore auto-repeat
+
+        _captureOrder.Add(vkCode);
+        HotkeyDisplayBox.Text = string.Join(" → ", _captureOrder.Select(GetKeyName)) + " ...";
+    }
+
+    private void CaptureInputUp(int vkCode)
+    {
+        _captureHeld.Remove(vkCode);
+
+        // Finalise once everything the user pressed has been let go.
+        if (_captureHeld.Count > 0 || _captureOrder.Count == 0) return;
+
+        var order = new List<int>(_captureOrder);
+        _captureOrder.Clear();
+
+        if (order.Any(IsMouseVirtualKey))
+        {
+            // Mouse combos are stored as an ordered sequence and must be pressed in this order.
+            _pendingHotkeySequence = order;
+        }
+        else
+        {
+            // Keyboard-only combos keep the existing order-independent modifier+key form.
+            _pendingHotkeySequence = new List<int>();
+            var nonModifiers = order.Where(v => !IsModifierKey(v)).ToList();
+
+            int modifiers = 0;
+            foreach (var vk in order) modifiers |= ModifierMask(vk);
+
+            if (nonModifiers.Count > 0)
+            {
+                _pendingHotkeyVirtualKey = nonModifiers[^1];
+            }
+            else
+            {
+                // All modifiers, e.g. plain Right Alt: the last one pressed is the trigger.
+                _pendingHotkeyVirtualKey = order[^1];
+                modifiers &= ~ModifierMask(order[^1]);
+            }
+
+            _pendingHotkeyModifiers = modifiers;
+        }
+
+        _isRecordingHotkey = false;
+        RecordHotkeyButton.Content = "Record";
+        UpdateHotkeyDisplay();
+    }
+
+    private static bool IsMouseVirtualKey(int vkCode) => vkCode is 0x02 or 0x04 or 0x05 or 0x06;
 
     private static bool IsModifierKey(int vkCode)
     {
         return vkCode is 160 or 161 or 162 or 163 or 164 or 165 or 91 or 92 or 16 or 17 or 18;
     }
+
+    private static int ModifierMask(int vkCode) => vkCode switch
+    {
+        162 or 163 or 17 => 1, // Ctrl
+        164 or 165 or 18 => 2, // Alt
+        160 or 161 or 16 => 4, // Shift
+        91 or 92 => 8,         // Win
+        _ => 0
+    };
 
     private static string GetModifierString(int modifiers)
     {
@@ -396,6 +488,10 @@ public partial class MainWindow : Window
     {
         return virtualKey switch
         {
+            0x02 => "Right Click",
+            0x04 => "Middle Click",
+            0x05 => "MB4",
+            0x06 => "MB5",
             8 => "Backspace",
             9 => "Tab",
             13 => "Enter",

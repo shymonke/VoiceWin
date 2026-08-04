@@ -44,6 +44,7 @@ public class TranscriptionOrchestrator : IDisposable
         _hotkeyService.TargetVirtualKey = _settingsService.Settings.HotkeyVirtualKey;
         _hotkeyService.TargetModifiers = _settingsService.Settings.HotkeyModifiers;
         _hotkeyService.Mode = _settingsService.Settings.HotkeyMode;
+        _hotkeyService.SetSequence(_settingsService.Settings.HotkeySequence);
 
         _hotkeyService.HotkeyPressed += OnHotkeyPressed;
         _hotkeyService.HotkeyReleased += OnHotkeyReleased;
@@ -337,6 +338,7 @@ public class TranscriptionOrchestrator : IDisposable
         _hotkeyService.TargetVirtualKey = _settingsService.Settings.HotkeyVirtualKey;
         _hotkeyService.TargetModifiers = _settingsService.Settings.HotkeyModifiers;
         _hotkeyService.Mode = _settingsService.Settings.HotkeyMode;
+        _hotkeyService.SetSequence(_settingsService.Settings.HotkeySequence);
     }
 
     public void Dispose()

@@ -11,6 +11,11 @@ public class AppSettings
     public string HotkeyMode { get; set; } = "hold";
     public int HotkeyVirtualKey { get; set; } = 165;
     public int HotkeyModifiers { get; set; } = 0; // 0=None, 1=Ctrl, 2=Alt, 4=Shift, 8=Win (combinable)
+
+    // Ordered input sequence, used instead of HotkeyVirtualKey/HotkeyModifiers when non-empty.
+    // Only populated for combos containing a mouse button (VK 0x02/0x04/0x05/0x06), which must
+    // be pressed in exactly this order. Keyboard-only combos stay order-independent.
+    public List<int> HotkeySequence { get; set; } = new();
     public string Language { get; set; } = "multi";
     public bool PlaySoundFeedback { get; set; } = true;
     public bool ShowRecordingOverlay { get; set; } = true;
