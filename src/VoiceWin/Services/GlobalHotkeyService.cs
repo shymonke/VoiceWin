@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 
 namespace VoiceWin.Services;
@@ -10,6 +11,13 @@ public class GlobalHotkeyService : IDisposable
     private nint _mouseHookId;
     private bool _isKeyDown;
     private DateTime _keyDownTime;
+
+    // Low-level hooks are global and synchronous: every keystroke and mouse event in Windows
+    // waits on this callback before any app sees it. So the callback must never do real work.
+    // Subscriber code (opening the audio device, network calls) is handed to this queue and
+    // run on one dedicated thread, which keeps press/release strictly in order.
+    private readonly BlockingCollection<bool> _eventQueue = new();
+    private readonly Thread _dispatchThread;
 
     public event EventHandler? HotkeyPressed;
     public event EventHandler? HotkeyReleased;
@@ -27,9 +35,10 @@ public class GlobalHotkeyService : IDisposable
     private readonly HashSet<int> _swallowed = new(); // inputs whose key-down we suppressed
     private readonly HashSet<int> _physicallyDown = new();
 
-    private bool _toggleState;
-    private bool _isRecording;
-    private bool _recordingStartedByTap;
+    // Written on the hook thread, but also cleared by CancelToggle() from the dispatch thread.
+    private volatile bool _toggleState;
+    private volatile bool _isRecording;
+    private volatile bool _recordingStartedByTap;
     private const int HybridHoldThresholdMs = 250;
 
     private const int WH_KEYBOARD_LL = 13;
@@ -70,6 +79,47 @@ public class GlobalHotkeyService : IDisposable
         _keyboardHookProc = KeyboardHookCallback;
         _mouseHookProc = MouseHookCallback;
         _keyboardHookId = SetHook(WH_KEYBOARD_LL, _keyboardHookProc);
+
+        _dispatchThread = new Thread(DispatchLoop)
+        {
+            IsBackground = true,
+            Name = "VoiceWin.HotkeyDispatch"
+        };
+        _dispatchThread.Start();
+    }
+
+    private void DispatchLoop()
+    {
+        foreach (var pressed in _eventQueue.GetConsumingEnumerable())
+        {
+            try
+            {
+                if (pressed)
+                    HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                else
+                    HotkeyReleased?.Invoke(this, EventArgs.Empty);
+            }
+            catch
+            {
+                // A failing subscriber must not kill the dispatch thread, or the hotkey
+                // would silently stop working for the rest of the session.
+            }
+        }
+    }
+
+    /// <summary>Queues an event for the dispatch thread. Called from the hook callback,
+    /// so it must return immediately and never throw.</summary>
+    private void Raise(bool pressed)
+    {
+        try
+        {
+            if (!_eventQueue.IsAddingCompleted)
+                _eventQueue.Add(pressed);
+        }
+        catch (InvalidOperationException)
+        {
+            // Queue was completed by Dispose between the check and the Add.
+        }
     }
 
     public static bool IsMouseButton(int vk) =>
@@ -233,12 +283,12 @@ public class GlobalHotkeyService : IDisposable
             {
                 _isKeyDown = true;
                 _keyDownTime = DateTime.UtcNow;
-                HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                Raise(pressed: true);
             }
             else if (isUpEvent && _isKeyDown)
             {
                 _isKeyDown = false;
-                HotkeyReleased?.Invoke(this, EventArgs.Empty);
+                Raise(pressed: false);
             }
         }
         else if (Mode == "toggle")
@@ -248,10 +298,7 @@ public class GlobalHotkeyService : IDisposable
                 _isKeyDown = true;
                 _toggleState = !_toggleState;
 
-                if (_toggleState)
-                    HotkeyPressed?.Invoke(this, EventArgs.Empty);
-                else
-                    HotkeyReleased?.Invoke(this, EventArgs.Empty);
+                Raise(pressed: _toggleState);
             }
             else if (isUpEvent)
             {
@@ -269,7 +316,7 @@ public class GlobalHotkeyService : IDisposable
                 {
                     _isRecording = true;
                     _recordingStartedByTap = false;
-                    HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                    Raise(pressed: true);
                 }
             }
             else if (isUpEvent && _isKeyDown)
@@ -284,7 +331,7 @@ public class GlobalHotkeyService : IDisposable
                     {
                         _isRecording = false;
                         _recordingStartedByTap = false;
-                        HotkeyReleased?.Invoke(this, EventArgs.Empty);
+                        Raise(pressed: false);
                     }
                 }
                 else if (!_recordingStartedByTap)
@@ -297,7 +344,7 @@ public class GlobalHotkeyService : IDisposable
                     // Second quick tap: toggle off.
                     _isRecording = false;
                     _recordingStartedByTap = false;
-                    HotkeyReleased?.Invoke(this, EventArgs.Empty);
+                    Raise(pressed: false);
                 }
             }
         }
@@ -318,6 +365,10 @@ public class GlobalHotkeyService : IDisposable
             UnhookWindowsHookEx(_mouseHookId);
             _mouseHookId = 0;
         }
+
+        _eventQueue.CompleteAdding();
+        _dispatchThread.Join(TimeSpan.FromSeconds(2));
+        _eventQueue.Dispose();
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
