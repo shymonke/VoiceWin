@@ -69,3 +69,8 @@ $RECYCLE.BIN/
 
 # Application settings (contains API keys)
 **/settings.json
+
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.local.json
+.claude/last-build.log
+.claude/build.sh
