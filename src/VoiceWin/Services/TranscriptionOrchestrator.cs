@@ -333,6 +333,14 @@ public class TranscriptionOrchestrator : IDisposable
         }
     }
 
+    /// <summary>Stops the current hotkey from firing while the settings window records a new one.</summary>
+    public void SetHotkeyCaptureMode(bool capturing)
+    {
+        _hotkeyService.SuspendMatching = capturing;
+        if (capturing)
+            _hotkeyService.CancelToggle();
+    }
+
     public void UpdateHotkeySettings()
     {
         _hotkeyService.TargetVirtualKey = _settingsService.Settings.HotkeyVirtualKey;

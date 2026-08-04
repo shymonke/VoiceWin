@@ -201,6 +201,8 @@ public partial class MainWindow : Window
         if (!int.TryParse(VadSilenceTimeoutBox.Text, out int timeout) || timeout < 0)
         {
             StatusText.Text = "Invalid silence timeout (must be a non-negative number)";
+            // Also shown next to the button, since the status panel may be scrolled out of view.
+            ShowSaveHint("Invalid silence timeout", isError: true);
             return;
         }
 
@@ -235,7 +237,24 @@ public partial class MainWindow : Window
         ApplyStartWithWindows(_app.SettingsService.Settings.StartWithWindows);
 
         StatusText.Text = "Settings saved!";
+        ShowSaveHint("Saved", isError: false);
         ResetStatusTextAfterDelay();
+    }
+
+    /// <summary>Shows a short message in the pinned bar next to the Save button, then clears it.</summary>
+    private void ShowSaveHint(string message, bool isError)
+    {
+        SaveHintText.Text = message;
+        SaveHintText.Foreground = (System.Windows.Media.Brush)FindResource(
+            isError ? "RecordingBrush" : "SuccessBrush");
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        timer.Tick += (s, e) =>
+        {
+            SaveHintText.Text = "";
+            timer.Stop();
+        };
+        timer.Start();
     }
 
     private void ResetStatusTextAfterDelay()
@@ -314,6 +333,9 @@ public partial class MainWindow : Window
         _isRecordingHotkey = true;
         _captureOrder.Clear();
         _captureHeld.Clear();
+        // Stand the global hotkey down, otherwise the old binding fires (and gets swallowed
+        // before the recorder can see it) while the user is pressing their new one.
+        _app.Orchestrator.SetHotkeyCaptureMode(true);
         RecordHotkeyButton.Content = "Cancel";
         HotkeyDisplayBox.Text = "Press keys / mouse buttons in order...";
         HotkeyDisplayBox.Focus();
@@ -324,6 +346,7 @@ public partial class MainWindow : Window
         _isRecordingHotkey = false;
         _captureOrder.Clear();
         _captureHeld.Clear();
+        _app.Orchestrator.SetHotkeyCaptureMode(false);
         RecordHotkeyButton.Content = "Record";
         UpdateHotkeyDisplay();
     }
@@ -447,8 +470,18 @@ public partial class MainWindow : Window
         }
 
         _isRecordingHotkey = false;
+        _app.Orchestrator.SetHotkeyCaptureMode(false);
         RecordHotkeyButton.Content = "Record";
         UpdateHotkeyDisplay();
+    }
+
+    /// <summary>If focus leaves mid-capture the keys go elsewhere, so abandon the recording
+    /// rather than leaving the global hotkey suspended indefinitely.</summary>
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+        if (_isRecordingHotkey)
+            StopRecordingHotkey();
     }
 
     private static bool IsMouseVirtualKey(int vkCode) => vkCode is 0x02 or 0x04 or 0x05 or 0x06;

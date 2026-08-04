@@ -26,6 +26,26 @@ public class GlobalHotkeyService : IDisposable
     public int TargetModifiers { get; set; } = 0;
     public string Mode { get; set; } = "hold";
 
+    private volatile bool _suspended;
+
+    /// <summary>While true both hooks pass every event straight through: nothing is matched and
+    /// nothing is swallowed. Used while the settings window is recording a new binding, so the
+    /// old hotkey neither starts a recording nor gets eaten before the recorder can see it.</summary>
+    public bool SuspendMatching
+    {
+        get => _suspended;
+        set
+        {
+            _suspended = value;
+            // Drop any half-held combo so a key still down when we resume can't complete a match.
+            if (!value)
+            {
+                ResetSequenceState();
+                _isKeyDown = false;
+            }
+        }
+    }
+
     /// <summary>Ordered sequence of virtual-key codes. When set, replaces the
     /// TargetVirtualKey/TargetModifiers matching and requires exact press order.</summary>
     private List<int> _sequence = new();
@@ -161,7 +181,7 @@ public class GlobalHotkeyService : IDisposable
 
     private nint KeyboardHookCallback(int nCode, nint wParam, nint lParam)
     {
-        if (nCode >= 0)
+        if (nCode >= 0 && !_suspended)
         {
             int vkCode = Marshal.ReadInt32(lParam);
             bool isDown = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
@@ -187,7 +207,7 @@ public class GlobalHotkeyService : IDisposable
 
     private nint MouseHookCallback(int nCode, nint wParam, nint lParam)
     {
-        if (nCode >= 0 && _sequence.Count > 0)
+        if (nCode >= 0 && !_suspended && _sequence.Count > 0)
         {
             int message = (int)wParam;
             int vk = message switch
