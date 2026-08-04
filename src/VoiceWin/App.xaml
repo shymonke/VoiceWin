@@ -88,6 +88,9 @@
             </Style>
 
             <Style TargetType="ComboBox">
+                <!-- A closed combo box eats the mouse wheel and silently changes its value while
+                     you are just trying to scroll the page. Forward the wheel to the page instead. -->
+                <EventSetter Event="PreviewMouseWheel" Handler="ComboBox_PreviewMouseWheel"/>
                 <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
                 <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>

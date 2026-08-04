@@ -18,14 +18,19 @@
     </Window.Resources>
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
         <tb:TaskbarIcon x:Name="TaskbarIcon"
                         IconSource="/Assets/vwtrans-crop.ico"
                         ToolTipText="VoiceWin - Ready"
                         ContextMenu="{StaticResource TrayMenu}"
                         TrayMouseDoubleClick="TaskbarIcon_TrayMouseDoubleClick"/>
 
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="24">
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="24,24,24,8">
                 <TextBlock Text="VoiceWin" 
                            FontSize="28" 
                            FontWeight="Bold" 
@@ -249,12 +254,31 @@
 
                 <CheckBox x:Name="StartMinimizedCheckBox" 
                           Content="Start minimized to tray"
-                          Margin="0,0,0,24"/>
-
-                <Button Content="Save Settings" 
-                        Click="SaveSettings_Click"
-                        Margin="0,0,0,12"/>
+                          Margin="0,0,0,8"/>
             </StackPanel>
         </ScrollViewer>
+
+        <!-- Pinned to the bottom so Save is always one click away, no scrolling to reach it. -->
+        <Border Grid.Row="1"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="24,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="SaveHintText"
+                           VerticalAlignment="Center"
+                           FontSize="13"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           Text=""/>
+                <Button Grid.Column="1"
+                        Content="Save Settings"
+                        Width="140"
+                        Click="SaveSettings_Click"/>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
